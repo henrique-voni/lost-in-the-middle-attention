@@ -39,20 +39,38 @@ def main(argv: list[str] | None = None) -> None:
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
+    # Gravação incremental: um run interrompido (crash, queda do Colab) continua de onde parou.
     if a.exp == "accuracy":
-        rows = []
+        path = out / f"accuracy_{a.model}.csv"
+        cols = ["model", "position", "qid", "correct", "answer"]
+        done = set(map(tuple, pd.read_csv(path)[["qid", "position"]].values)) if path.exists() else set()
+        if not path.exists():
+            pd.DataFrame(columns=cols).to_csv(path, index=False)
         for qid in tqdm(qids, desc=f"{a.model} accuracy"):
             ex = examples[qid]
+            rows = []
             for pos in positions:
+                if (qid, pos) in done:
+                    continue
                 text = chat_text(tok, build_prompt(ex["question"], move_gold(ex, pos))[0])
                 ans = generate(model, tok, text)
                 rows.append((a.model, pos, qid, score_answer(ans, ex["answers"]), ans.split("\n")[0].strip()))
-        pd.DataFrame(rows, columns=["model", "position", "qid", "correct", "answer"]).to_csv(
-            out / f"accuracy_{a.model}.csv", index=False)
+            pd.DataFrame(rows, columns=cols).to_csv(path, mode="a", header=False, index=False)
     else:
-        rel = None
-        for j, qid in enumerate(tqdm(qids, desc=f"{a.model} attention")):
-            ex = examples[qid]
+        path = out / f"attention_{a.model}.npz"
+        rel, start = None, 0
+        if path.exists():
+            z = np.load(path)
+            assert list(z["qids"]) == qids and list(z["positions"]) == positions, "run anterior com outra config"
+            rel, start = z["rel"], int(z["done"])
+
+        def save(done):
+            tmp = path.with_suffix(".tmp.npz")
+            np.savez_compressed(tmp, rel=rel, qids=np.array(qids), positions=np.array(positions), done=done)
+            tmp.replace(path)  # atômico: um crash no meio do save não corrompe o arquivo
+
+        for j in tqdm(range(start, len(qids)), desc=f"{a.model} attention", initial=start, total=len(qids)):
+            ex = examples[qids[j]]
             for i, pos in enumerate(positions):
                 prompt, docs = build_prompt(ex["question"], move_gold(ex, pos))
                 text = chat_text(tok, prompt)
@@ -60,8 +78,8 @@ def main(argv: list[str] | None = None) -> None:
                 if rel is None:
                     rel = np.zeros((len(positions), len(qids), *r.shape), dtype=np.float16)
                 rel[i, j] = r
-        np.savez_compressed(out / f"attention_{a.model}.npz", rel=rel, qids=np.array(qids),
-                            positions=np.array(positions))
+            if (j + 1) % 5 == 0 or j + 1 == len(qids):
+                save(j + 1)
 
     mem = f", pico VRAM {torch.cuda.max_memory_allocated() / 2**30:.1f} GB" if torch.cuda.is_available() else ""
     print(f"{a.model} {a.exp}: {time.time() - t0:.0f}s{mem}")
