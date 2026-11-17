@@ -7,7 +7,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from litm.data import build_prompt, load_examples
-from litm.model import MODELS, chat_text, doc_token_spans, last_row_attention, load
+from litm.model import MODELS, chat_text, doc_token_spans, generate, last_row_attention, load
 
 FIX = Path(__file__).parent / "fixtures"
 EX = load_examples(FIX / "gold_at_0_head3.jsonl")[0]
@@ -66,6 +66,20 @@ def test_doc_token_spans_duplicate_docs(tiny):
     prompt, docs = build_prompt("who?", [CTXS3[0], CTXS3[0]])
     spans = doc_token_spans(tok, chat_text(tok, prompt), docs)
     assert spans[0] != spans[1]
+
+
+def test_generate_stops_at_first_newline_same_first_line(tiny):
+    # a métrica só usa a 1ª linha; com greedy, parar no "\n" não muda o resultado, só o tempo
+    m, tok, _ = tiny
+    text = chat_text(tok, "List five fruits, one per line.")
+    ids = tok(text, return_tensors="pt", add_special_tokens=False)
+    with torch.no_grad():
+        full = m.generate(**ids, max_new_tokens=100, do_sample=False, temperature=None, top_p=None, top_k=None)
+    full = tok.decode(full[0, ids.input_ids.shape[1]:], skip_special_tokens=True)
+    assert "\n" in full.strip("\n"), "pré-condição: o modelo gera mais de uma linha neste prompt"
+    out = generate(m, tok, text)
+    assert out.rstrip("\n").count("\n") == 0
+    assert out.split("\n")[0] == full.split("\n")[0]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="precisa de CUDA")

@@ -70,8 +70,10 @@ def doc_token_spans(tokenizer, text: str, docs: list[str]) -> list[tuple[int, in
 @torch.no_grad()
 def generate(model, tokenizer, text: str, max_new_tokens: int = 100) -> str:
     ids = tokenizer(text, return_tensors="pt", add_special_tokens=False).to(model.device)
+    # Para no 1º "\n": a métrica do paper só usa a 1ª linha e, com greedy, ela não muda.
     out = model.generate(**ids, max_new_tokens=max_new_tokens, do_sample=False,
-                         temperature=None, top_p=None, top_k=None)
+                         temperature=None, top_p=None, top_k=None,
+                         stop_strings=["\n"], tokenizer=tokenizer)
     return tokenizer.decode(out[0, ids.input_ids.shape[1]:], skip_special_tokens=True)
 
 
