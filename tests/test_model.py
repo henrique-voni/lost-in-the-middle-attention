@@ -68,6 +68,13 @@ def test_doc_token_spans_duplicate_docs(tiny):
     assert spans[0] != spans[1]
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="precisa de CUDA")
+def test_load_uses_fp16_on_cuda():
+    # bf16 deriva do fp32 em até 0,05 na atenção relativa (Qwen3); fp16 fica em 0,001
+    m, _ = load("tiny")
+    assert m.dtype == torch.float16
+
+
 @pytest.mark.parametrize("key", ["smollm3-3b", "qwen3-4b"])
 def test_chat_text_no_open_think(key):
     t = chat_text(AutoTokenizer.from_pretrained(MODELS[key]), "hi")

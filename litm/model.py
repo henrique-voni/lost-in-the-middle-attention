@@ -37,10 +37,9 @@ AttentionMaskInterface.register("last_row_sdpa", AttentionMaskInterface._global_
 
 def load(key: str, device: str | None = None):
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    if device == "cpu":
-        dtype = torch.float32
-    else:
-        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    # fp16, não bf16: com bf16 a atenção do Qwen3 deriva até 0,05 do fp32 nas camadas
+    # finais; com fp16 fica em ~0,001. Também é o que a T4 do Colab usa.
+    dtype = torch.float32 if device == "cpu" else torch.float16
     tok = AutoTokenizer.from_pretrained(MODELS[key])
     model = AutoModelForCausalLM.from_pretrained(
         MODELS[key], dtype=dtype, attn_implementation="last_row_sdpa"
